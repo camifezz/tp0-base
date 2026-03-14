@@ -22,11 +22,10 @@ services:
     entrypoint: python3 /main.py
     environment:
       - PYTHONUNBUFFERED=1
-      - LOGGING_LEVEL=DEBUG
     networks:
       - testing_net
     volumes:
-      - ./server/config.ini:/config.ini
+      - ./server/config.ini:/config.ini:ro
 COMPOSE
 
 for i in $(seq 1 "$client_count"); do
@@ -38,9 +37,8 @@ for i in $(seq 1 "$client_count"); do
     entrypoint: /client
     environment:
       - CLI_ID=${i}
-      - CLI_LOG_LEVEL=DEBUG
     volumes:
-      - ./client/config.yaml:/config.yaml
+      - ./client/config.yaml:/config.yaml:ro
     networks:
       - testing_net
     depends_on:

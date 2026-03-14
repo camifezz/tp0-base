@@ -127,6 +127,20 @@ En caso de que la validación sea exitosa imprimir: `action: test_echo_server | 
 El script deberá ubicarse en la raíz del proyecto. Netcat no debe ser instalado en la máquina _host_ y no se pueden exponer puertos del servidor para realizar la comunicación (hint: `docker network`). `
 
 ### Solución propuesta Ejercicio N°3:
+- Se busca el contenedor server que está corriendo.
+- Se obtiene la red Docker a la que está conectado el server.
+
+- Se levanta un contenedor temporal como cliente de prueba, conectado a esa misma red. Para esto se reutiliza la imagen `client:latest`.
+- Se usa netcat desde ese contenedor temporal para enviar un mensaje al servidor.
+- Se compara la respuesta recibida con el mensaje enviado `tst server`
+- Si las respuestas coinciden, se imprime el mensaje pedido.
+- Se deja fijo el puerto del servidor en 12345.
+
+#### Ejecución
+- `./generar-compose.sh docker-compose-dev.yaml 0` para dejar un compose con solo el servidor.
+- `docker compose -f docker-compose-dev.yaml up -d --build` para levantar las imágenes del ejercicio.
+- `./validar-echo-server.sh` para lanzar el chequeo vía netcat (debería loguear `action: test_echo_server | result: success`).
+- `docker compose -f docker-compose-dev.yaml down` para apagar el entorno cuando se termina de probar.
 
 
 ### Ejercicio N°4:

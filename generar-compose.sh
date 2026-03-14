@@ -14,7 +14,7 @@ if ! [[ "$client_count" =~ ^[0-9]+$ ]] || [ "$client_count" -le 0 ]; then
 fi
 
 cat > "$output_file" <<'COMPOSE'
-name: ej1
+name: tp0
 services:
   server:
     container_name: server

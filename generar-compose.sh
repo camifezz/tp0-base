@@ -8,8 +8,8 @@ fi
 output_file="$1"
 client_count="$2"
 
-if ! [[ "$client_count" =~ ^[0-9]+$ ]] || [ "$client_count" -le 0 ]; then
-  echo "La cantidad de clientes debe ser un entero mayor a cero" >&2
+if ! [[ "$client_count" =~ ^[0-9]+$ ]]; then
+  echo "La cantidad de clientes debe ser un entero mayor o igual a cero" >&2
   exit 1
 fi
 
@@ -28,8 +28,9 @@ services:
       - ./server/config.ini:/config.ini:ro
 COMPOSE
 
-for i in $(seq 1 "$client_count"); do
-  cat >> "$output_file" <<COMPOSE
+if [ "$client_count" -gt 0 ]; then
+  for i in $(seq 1 "$client_count"); do
+    cat >> "$output_file" <<COMPOSE
 
   client${i}:
     container_name: client${i}
@@ -44,7 +45,8 @@ for i in $(seq 1 "$client_count"); do
     depends_on:
       - server
 COMPOSE
-done
+  done
+fi
 
 cat >> "$output_file" <<'COMPOSE'
 

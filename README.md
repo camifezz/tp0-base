@@ -116,7 +116,8 @@ Modificar el cliente y el servidor para lograr que realizar cambios en el archiv
 
 ### Solución propuesta Ejercicio N°2:
 - Se eliminan los copy de la config dentro de los archivos Dockerfile del server y del cliente.
-
+- Se montan los archivos de configuración `server/config.ini` y `client/config.yaml` como `bind mounts` de solo lectura en cada servicio del docker-compose
+- Se actualiza el file `generar-compose.sh` con los volumes correspondientes.
 
 ### Ejercicio N°3:
 Crear un script de bash `validar-echo-server.sh` que permita verificar el correcto funcionamiento del servidor utilizando el comando `netcat` para interactuar con el mismo. Dado que el servidor es un echo server, se debe enviar un mensaje al servidor y esperar recibir el mismo mensaje enviado.

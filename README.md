@@ -152,7 +152,17 @@ Se modificaron los 4 archivos principales del esqueleto, `main.go`, `server.py` 
  `server.py` = Decidí agregar el manejo `SIGTERM` dentro de la clase `Server`.
  En el constructor le agregué un atributo `_shutting_down` para registrar si le llega o no la señal y también en el constructor capturo la señal `signal.signal(signal.SIGTERM, self._handle_sigterm)` y que llama al método `_handle_sigterm` para que cerrar la conexión del lado del server y no aceptar mas conexiones y también, para cerrar los sockets abiertos de forma correcta.
 
+ `client.go` = Decidí agregar dentro de la estructura `Client` un atributo shuttingDown para saber si el cliente recibió o no una señal de cierre. También agregué un método `Shutdown()` que marca el cliente en modo apagado y cierra la conexión activa si existe. 
+
+ `main.go` = Decidí modificar el main del cliente para capturar la señal `SIGTERM` y coordinar el cierre graceful. Para eso, agregué el uso de os/signal y syscall, y corrí client.StartClientLoop() dentro de una goroutine para que el main no quede bloqueado y pueda seguir escuchando señales. Cuando llega `SIGTERM`, el main llama a client.Shutdown(), espera a que termine el loop del cliente y recién después finaliza el proceso. 
+
 #### Ejecución
+Para probar lo implementado primero:
+- Ejecutar el comando `./generar-compose.sh docker-compose-dev.yaml 5` con la cantidad de clientes que se quieran levantar.
+- ` make docker-compose-up` para levantar y buildear los containers.
+- `make docker-compose-logs` para poder ver el intercambio de mensajes entre los clientes y el server.
+- `make docker-compose-down` para mandar la `SIGTERM` y revisar la terminal donde están los logs para ver que aparezcan los mensajes de _graceful_
+
 
 ## Parte 2: Repaso de Comunicaciones
 

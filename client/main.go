@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/op/go-logging"
@@ -46,8 +48,6 @@ func InitConfig() (*viper.Viper, error) {
 	if err := v.ReadInConfig(); err != nil {
 		fmt.Printf("Configuration could not be read from config file. Using env variables instead")
 	}
-
-	// Parse time.Duration variables and return an error if those variables cannot be parsed
 
 	if _, err := time.ParseDuration(v.GetString("loop.period")); err != nil {
 		return nil, errors.Wrapf(err, "Could not parse CLI_LOOP_PERIOD env var as time.Duration.")
@@ -94,10 +94,12 @@ func main() {
 	v, err := InitConfig()
 	if err != nil {
 		log.Criticalf("%s", err)
+		return
 	}
 
 	if err := InitLogger(v.GetString("log.level")); err != nil {
 		log.Criticalf("%s", err)
+		return
 	}
 
 	// Print program config with debugging purposes
@@ -111,5 +113,22 @@ func main() {
 	}
 
 	client := common.NewClient(clientConfig)
-	client.StartClientLoop()
+
+	sigCh := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(sigCh, syscall.SIGTERM)
+
+	go func() {
+		client.StartClientLoop()
+		close(done)
+	}()
+
+	select {
+	case <-sigCh:
+		client.Shutdown()
+		<-done
+		log.Infof("action: graceful_shutdown | result: success | client_id: %s", clientConfig.ID)
+	case <-done:
+		log.Infof("action: client_finished | result: success | client_id: %s", clientConfig.ID)
+	}
 }

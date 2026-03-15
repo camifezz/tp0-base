@@ -159,7 +159,7 @@ Se modificaron los 4 archivos principales del esqueleto, `main.go`, `server.py` 
 #### Ejecución
 Para probar lo implementado primero:
 - Ejecutar el comando `./generar-compose.sh docker-compose-dev.yaml 5` con la cantidad de clientes que se quieran levantar.
-- ` make docker-compose-up` para levantar y buildear los containers.
+- `make docker-compose-up` para levantar y buildear los containers.
 - `make docker-compose-logs` para poder ver el intercambio de mensajes entre los clientes y el server.
 - `make docker-compose-down` para mandar la `SIGTERM` y revisar la terminal donde están los logs para ver que aparezcan los mensajes de _graceful_
 
@@ -189,6 +189,8 @@ Se deberá implementar un módulo de comunicación entre el cliente y el servido
 * Correcta separación de responsabilidades entre modelo de dominio y capa de comunicación.
 * Correcto empleo de sockets, incluyendo manejo de errores y evitando los fenómenos conocidos como [_short read y short write_](https://cs61.seas.harvard.edu/site/2018/FileDescriptors/).
 
+### Solución propuesta Ejercicio N°5:
+Como pasos principales decidí eliminar el sleep del lado del cliente y también que la conexión entre cliente se establezca una única vez y se cierre cuando se termine la comunicación.
 
 ### Ejercicio N°6:
 Modificar los clientes para que envíen varias apuestas a la vez (modalidad conocida como procesamiento por _chunks_ o _batchs_). 

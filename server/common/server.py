@@ -52,17 +52,19 @@ class Server:
         logging.info('action: graceful_shutdown | result: success')
 
     def __handle_client_connection(self, client_sock):
-        """
-        Read message from a specific client socket and closes the socket.
-
-        If a problem arises in the communication with the client, the
-        client socket will also be closed.
-        """
         try:
-            msg = client_sock.recv(1024).rstrip().decode('utf-8')
             addr = client_sock.getpeername()
-            logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
-            client_sock.send(f"{msg}\n".encode('utf-8'))
+
+            while not self._shutting_down:
+                data = client_sock.recv(1024)
+
+                if not data:
+                    break
+
+                msg = data.rstrip().decode('utf-8')
+                logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
+                client_sock.send(f"{msg}\n".encode('utf-8'))
+
         except OSError as e:
             logging.error(f'action: receive_message | result: fail | error: {e}')
         finally:
@@ -71,6 +73,7 @@ class Server:
                 logging.info('action: close_client_socket | result: success')
             except OSError as e:
                 logging.error(f'action: close_client_socket | result: fail | error: {e}')
+
 
     def __accept_new_connection(self):
         """
@@ -84,4 +87,3 @@ class Server:
         c, addr = self._server_socket.accept()
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         return c
-

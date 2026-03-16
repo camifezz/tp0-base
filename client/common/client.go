@@ -1,8 +1,6 @@
 package common
 
 import (
-	"bufio"
-	"fmt"
 	"net"
 
 	"github.com/op/go-logging"
@@ -13,7 +11,7 @@ var log = logging.MustGetLogger("log")
 type ClientConfig struct {
 	ID            string
 	ServerAddress string
-	LoopAmount    int
+	Bet           Bet
 }
 
 type Client struct {
@@ -23,10 +21,7 @@ type Client struct {
 }
 
 func NewClient(config ClientConfig) *Client {
-	client := &Client{
-		config: config,
-	}
-	return client
+	return &Client{config: config}
 }
 
 func (c *Client) createClientSocket() error {
@@ -73,43 +68,28 @@ func (c *Client) StartClientLoop() {
 	}
 	defer c.closeConnection()
 
-	reader := bufio.NewReader(c.conn)
-
-	for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-		if c.shuttingDown {
-			log.Infof("action: stop_loop | result: success | client_id: %v", c.config.ID)
-			return
-		}
-
-		_, err := fmt.Fprintf(
-			c.conn,
-			"[CLIENT %v] Message N°%v\n",
-			c.config.ID,
-			msgID,
-		)
-		if err != nil {
-			log.Errorf("action: send_message | result: fail | client_id: %v | error: %v",
-				c.config.ID,
-				err,
-			)
-			return
-		}
-
-		msg, err := reader.ReadString('\n')
-		if err != nil {
-			log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-				c.config.ID,
-				err,
-			)
-			return
-		}
-
-		log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
-			c.config.ID,
-			msg,
-		)
+	if c.shuttingDown {
+		return
 	}
 
-	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
-}
+	if err := SendBet(c.conn, c.config.Bet); err != nil {
+		log.Errorf("action: send_bet | result: fail | client_id: %v | error: %v",
+			c.config.ID, err)
+		return
+	}
 
+	response, err := ReceiveResponse(c.conn)
+	if err != nil {
+		log.Errorf("action: receive_response | result: fail | client_id: %v | error: %v",
+			c.config.ID, err)
+		return
+	}
+
+	if response == "OK" {
+		log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v",
+			c.config.Bet.Document, c.config.Bet.Number)
+	} else {
+		log.Errorf("action: apuesta_enviada | result: fail | client_id: %v | response: %v",
+			c.config.ID, response)
+	}
+}

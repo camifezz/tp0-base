@@ -1,6 +1,8 @@
 import socket
 import logging
 import signal
+from .protocol import receive_bet, send_response
+from .utils import store_bets
 
 
 class Server:
@@ -53,20 +55,16 @@ class Server:
 
     def __handle_client_connection(self, client_sock):
         try:
-            addr = client_sock.getpeername()
-
-            while not self._shutting_down:
-                data = client_sock.recv(1024)
-
-                if not data:
-                    break
-
-                msg = data.rstrip().decode('utf-8')
-                logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
-                client_sock.send(f"{msg}\n".encode('utf-8'))
-
-        except OSError as e:
-            logging.error(f'action: receive_message | result: fail | error: {e}')
+            bet = receive_bet(client_sock)
+            store_bets([bet])
+            logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+            send_response(client_sock, ok=True)
+        except (OSError, ConnectionError, ValueError) as e:
+            logging.error(f'action: receive_bet | result: fail | error: {e}')
+            try:
+                send_response(client_sock, ok=False)
+            except OSError:
+                pass
         finally:
             try:
                 client_sock.close()

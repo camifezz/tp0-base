@@ -189,7 +189,52 @@ Se deberá implementar un módulo de comunicación entre el cliente y el servido
 * Correcto empleo de sockets, incluyendo manejo de errores y evitando los fenómenos conocidos como [_short read y short write_](https://cs61.seas.harvard.edu/site/2018/FileDescriptors/).
 
 ### Solución propuesta Ejercicio N°5:
-Como pasos principales decidí eliminar el sleep del lado del cliente y también que la conexión entre cliente se establezca una única vez y se cierre cuando se termine la comunicación.
+
+#### Arquitectura Cliente - Servidor
+- El cliente establece **una única conexión TCP** al servidor, envía la apuesta, espera la confirmación y cierra la conexión.
+- El servidor es **monothreaded**: atiende un cliente a la vez, recibe la apuesta, la persiste con `store_bets(...)` y responde antes de aceptar la siguiente conexión.
+- Las variables de entorno `NOMBRE`, `APELLIDO`, `DOCUMENTO`, `NACIMIENTO` y `NUMERO` son leídas por el cliente al arrancar. Estas variables se encuentran seteadas en el file `generar-compose.sh`
+
+#### Protocolo de comunicación
+
+Se definió un protocolo con prefijo de longitud  para evitar los fenómenos de _short read_ y _short write_ propios de TCP.
+
+**Formato de mensaje (cliente → servidor):**
+```
+[ 4 bytes big-endian: bytes que contiene el mensaje ][ cuerpo UTF-8 ]
+```
+
+El cuerpo es un string con los campos separados por `|`:
+```
+agencia|nombre|apellido|documento|nacimiento|numero
+```
+
+Ejemplo:
+```
+1|Santiago Lionel|Lorca|30904465|1999-03-17|7574
+```
+
+**Formato de respuesta (servidor → cliente):**
+```
+[ 4 bytes big-endian: longitud del cuerpo ][ "OK" o "ERR" ]
+```
+
+#### Separación de responsabilidades
+
+| Módulo | Responsabilidad |
+|---|---|
+| `client/common/protocol.go` | Serialización de `Bet` y deserialización de la respuesta |
+| `client/common/client.go` | Lógica de negocio del cliente (conexión, envío, log) |
+| `server/common/protocol.py` | Deserialización de la apuesta y serialización de la respuesta |
+| `server/common/server.py` | Lógica de negocio del servidor (aceptar conexión, persiste, respondees) |
+| `server/common/utils.py` | Modelo de dominio (`Bet`) y persistencia (`store_bets`) |
+
+
+#### Ejecución
+- `./generar-compose.sh docker-compose-dev.yaml 1` para generar el compose con 1 cliente (se puede poner cualquier número mayor o igual a cero).
+- `make docker-compose-up` para levantar los containers.
+- `make docker-compose-logs` para ver los logs del intercambio.
+- `make docker-compose-down` para detener el entorno.
 
 ### Ejercicio N°6:
 Modificar los clientes para que envíen varias apuestas a la vez (modalidad conocida como procesamiento por _chunks_ o _batchs_). 

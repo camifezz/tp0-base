@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 )
+
+const maxPayloadSize = 8192 // 8 KiB
 
 // Bet representa una apuesta de quiniela a enviar al servidor.
 type Bet struct {
@@ -17,26 +20,35 @@ type Bet struct {
 	Number    string
 }
 
-// SendBet serializa la apuesta y la envía por la conexión usando un prefijo
-// de 4 bytes big-endian con la longitud del mensaje para evitar short writes.
-func SendBet(conn net.Conn, bet Bet) error {
-	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s",
-		bet.Agency,
-		bet.FirstName,
-		bet.LastName,
-		bet.Document,
-		bet.Birthdate,
-		bet.Number,
-	)
+// SendBatch serializa un batch de apuestas y lo envía por la conexión.
+// Cada apuesta se separa con '\n' en el body. El protocolo usa un prefijo
+// de 4 bytes big-endian con la longitud total para evitar short writes.
+// Retorna error si el payload supera los 8 KiB.
+func SendBatch(conn net.Conn, bets []Bet) error {
+	lines := make([]string, len(bets))
+	for i, bet := range bets {
+		lines[i] = fmt.Sprintf("%s|%s|%s|%s|%s|%s",
+			bet.Agency,
+			bet.FirstName,
+			bet.LastName,
+			bet.Document,
+			bet.Birthdate,
+			bet.Number,
+		)
+	}
 
-	data := []byte(payload)
+	payload := []byte(strings.Join(lines, "\n"))
+	if len(payload) > maxPayloadSize {
+		return fmt.Errorf("payload de %d bytes supera el límite de %d bytes", len(payload), maxPayloadSize)
+	}
+
 	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(data)))
+	binary.BigEndian.PutUint32(header, uint32(len(payload)))
 
 	if err := sendAll(conn, header); err != nil {
 		return err
 	}
-	return sendAll(conn, data)
+	return sendAll(conn, payload)
 }
 
 // ReceiveResponse lee una respuesta con prefijo de longitud enviada por el servidor.

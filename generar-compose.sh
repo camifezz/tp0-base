@@ -38,13 +38,9 @@ if [ "$client_count" -gt 0 ]; then
     entrypoint: /client
     environment:
       - CLI_ID=${i}
-      - NOMBRE=Santiago Lionel
-      - APELLIDO=Lorca
-      - DOCUMENTO=3090446${i}
-      - NACIMIENTO=1999-03-17
-      - NUMERO=757${i}
     volumes:
       - ./client/config.yaml:/config.yaml:ro
+      - ./.data/dataset/agency-${i}.csv:/agency-${i}.csv:ro
     networks:
       - testing_net
     depends_on:

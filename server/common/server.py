@@ -1,7 +1,7 @@
 import socket
 import logging
 import signal
-from .protocol import receive_bet, send_response
+from .protocol import receive_batch, send_response
 from .utils import store_bets
 
 
@@ -54,17 +54,26 @@ class Server:
         logging.info('action: graceful_shutdown | result: success')
 
     def __handle_client_connection(self, client_sock):
+        """
+        Atiende a un cliente en loop, recibiendo batches de apuestas hasta que
+        el cliente cierre la conexión. Por cada batch responde OK o ERR.
+        """
         try:
-            bet = receive_bet(client_sock)
-            store_bets([bet])
-            logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
-            send_response(client_sock, ok=True)
-        except (OSError, ConnectionError, ValueError) as e:
-            logging.error(f'action: receive_bet | result: fail | error: {e}')
-            try:
-                send_response(client_sock, ok=False)
-            except OSError:
-                pass
+            while True:
+                try:
+                    bets = receive_batch(client_sock)
+                except ConnectionError:
+                    # El cliente cerró la conexión, fin del intercambio
+                    break
+                try:
+                    store_bets(bets)
+                    logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
+                    send_response(client_sock, ok=True)
+                except Exception as e:
+                    logging.error(f'action: apuesta_recibida | result: fail | cantidad: {len(bets)} | error: {e}')
+                    send_response(client_sock, ok=False)
+        except (OSError, ValueError) as e:
+            logging.error(f'action: receive_batch | result: fail | error: {e}')
         finally:
             try:
                 client_sock.close()

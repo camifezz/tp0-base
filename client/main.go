@@ -95,17 +95,12 @@ func main() {
 	// Print program config with debugging purposes
 	PrintConfig(v)
 
+	id := v.GetString("id")
 	clientConfig := common.ClientConfig{
 		ServerAddress: v.GetString("server.address"),
-		ID:            v.GetString("id"),
-		Bet: common.Bet{
-			Agency:    v.GetString("id"),
-			FirstName: os.Getenv("NOMBRE"),
-			LastName:  os.Getenv("APELLIDO"),
-			Document:  os.Getenv("DOCUMENTO"),
-			Birthdate: os.Getenv("NACIMIENTO"),
-			Number:    os.Getenv("NUMERO"),
-		},
+		ID:            id,
+		DataFilePath:  fmt.Sprintf("/agency-%s.csv", id),
+		MaxBatchSize:  v.GetInt("batch.maxAmount"),
 	}
 
 	client := common.NewClient(clientConfig)

@@ -25,18 +25,26 @@ def _send_all(sock, data):
         total += sent
 
 
-def receive_bet(sock):
+def receive_batch(sock):
     """
-    Recibe una apuesta del cliente.
-    Protocolo: [4 bytes big-endian con longitud][agencia|nombre|apellido|documento|nacimiento|numero]
+    Recibe un batch de apuestas del cliente.
+    Protocolo: [4 bytes big-endian con longitud][apuesta1\\napuesta2\\n...]
+    Cada apuesta tiene el formato: agencia|nombre|apellido|documento|nacimiento|numero
+    Retorna una lista de Bet. Lanza ConnectionError si el cliente cerró la conexión.
     """
     header = _recv_exactly(sock, HEADER_SIZE)
     length = struct.unpack('!I', header)[0]
     body = _recv_exactly(sock, length).decode('utf-8')
 
-    fields = body.split('|')
-    agency, first_name, last_name, document, birthdate, number = fields
-    return Bet(agency, first_name, last_name, document, birthdate, number)
+    bets = []
+    for line in body.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        fields = line.split('|')
+        agency, first_name, last_name, document, birthdate, number = fields
+        bets.append(Bet(agency, first_name, last_name, document, birthdate, number))
+    return bets
 
 
 def send_response(sock, ok):

@@ -249,6 +249,84 @@ La cantidad máxima de apuestas dentro de cada _batch_ debe ser configurable des
 
 Por su parte, el servidor deberá responder con éxito solamente si todas las apuestas del _batch_ fueron procesadas correctamente.
 
+
+### Solución propuesta Ejercicio N°6:
+
+#### Fuente de datos
+Cada cliente (agencia N) lee sus apuestas desde el archivo `.data/agency-{N}.csv`, inyectado en el container (desde el archivo `generar-compose.sh`)  mediante un volumen de Docker.
+
+#### Armado dinámico de batches
+El cliente lee el CSV línea a línea y va acumulando apuestas en un batch. El batch se flushea cuando se cumple alguna de estas condiciones:
+
+1. Se alcanzó `batch.maxAmount` apuestas (variable configurable en `config.yaml`).
+2. Agregar la siguiente apuesta supera el límite de **8 KiB** del payload.
+
+El tamaño de cada apuesta se calcula sobre su representación serializada 
+`agency|nombre|apellido|documento|nacimiento|numero` antes de agregarla al batch, nunca se construye un payload que ya supere el límite. Esto garantiza que el tamaño del batch es dinámico, ya que depende del contenido real de cada apuesta.
+
+Ejemplo con maxAmount=2 y límite de 8 KB:
+```
+bet1 (7 KB) → batch1: [bet1]          (no entra bet2 por tamaño)
+bet2 (2 KB) → batch2: [bet2, bet3]    (no entra bet4 por maxAmount)
+bet3 (2 KB) ↗
+bet4 (2 KB) → batch3: [bet4]          (último batch)
+```
+
+#### Protocolo de comunicación
+El protocolo no cambia respecto al ejercicio 5: se sigue manteniendo el header de 4 bytes con la longitud del body, seguido del body. Lo que cambia es el contenido del body: ahora tiene N apuestas separadas por `\n`, cada una en el formato `agency|nombre|apellido|documento|nacimiento|numero`.
+
+```
+[4 bytes: longitud del body][agency|fn|ln|doc|birth|num\nagency|fn|ln|doc|birth|num\n...]
+```
+
+#### Servidor
+Recibe el batch completo, lo splitea por `\n`, parsea cada apuesta y llama a `store_bets(...)`. Si todo es exitoso responde `OK` e imprime `action: apuesta_recibida | result: success | cantidad: N`. Si hay error responde `ERR` e imprime `action: apuesta_recibida | result: fail | cantidad: N`.
+
+
+#### Manejo de error en caso de que un paquete falle
+En caso de que un batch falle:
+- El server responde con el mensaje `ERR` y sigue esperando el próximo batch, básicamente descarta el batch fallido.
+- El cliente recibe el mensaje `ERR` envidado por el server y continúa enviando el próximo batch.
+
+Las apuestas del batch fallido se pierden, en este caso no hay retry ni ningún estilo de reenvío.
+
+
+#### Logs esperados
+- Servidor: `action: apuesta_recibida | result: success | cantidad: ${CANTIDAD_DE_APUESTAS}`
+- Cliente: `action: apuesta_enviada | result: success | cantidad: ${CANTIDAD_DE_APUESTAS}`
+
+#### Cómo ejecutar
+
+1. Descomprimir los datasets (en caso de que estén comprimidos) en `.data/`:
+```bash
+cd .data && unzip datasets.zip
+```
+
+2. Generar el `docker-compose-dev.yaml` a través del archivo `./generar-compose.sh` con N clientes (ej. 5):
+```bash
+./generar-compose.sh docker-compose-dev.yaml 5
+```
+
+3. Construir las imágenes:
+```bash
+make docker-image
+```
+
+4. Levantar el entorno:
+```bash
+make docker-compose-up
+```
+
+5. Ver los logs:
+```bash
+make docker-compose-logs
+```
+
+6. Detener el entorno:
+```bash
+make docker-compose-down
+```
+
 ### Ejercicio N°7:
 
 Modificar los clientes para que notifiquen al servidor al finalizar con el envío de todas las apuestas y así proceder con el sorteo.

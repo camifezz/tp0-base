@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-const maxPayloadSize = 8192 // 8 KiB
+// MaxPayloadSize es el límite en bytes del payload de un batch (8 KiB).
+const MaxPayloadSize = 8192
 
 // Bet representa una apuesta de quiniela a enviar al servidor.
 type Bet struct {
@@ -20,10 +21,20 @@ type Bet struct {
 	Number    string
 }
 
+// SerializedBetSize devuelve el tamaño en bytes de la serialización de una apuesta
+// en el formato "agency|fn|ln|doc|birth|num", sin contar el separador '\n' entre apuestas.
+func SerializedBetSize(bet Bet) int {
+	return len(bet.Agency) + 1 +
+		len(bet.FirstName) + 1 +
+		len(bet.LastName) + 1 +
+		len(bet.Document) + 1 +
+		len(bet.Birthdate) + 1 +
+		len(bet.Number)
+}
+
 // SendBatch serializa un batch de apuestas y lo envía por la conexión.
 // Cada apuesta se separa con '\n' en el body. El protocolo usa un prefijo
 // de 4 bytes big-endian con la longitud total para evitar short writes.
-// Retorna error si el payload supera los 8 KiB.
 func SendBatch(conn net.Conn, bets []Bet) error {
 	lines := make([]string, len(bets))
 	for i, bet := range bets {
@@ -38,9 +49,6 @@ func SendBatch(conn net.Conn, bets []Bet) error {
 	}
 
 	payload := []byte(strings.Join(lines, "\n"))
-	if len(payload) > maxPayloadSize {
-		return fmt.Errorf("payload de %d bytes supera el límite de %d bytes", len(payload), maxPayloadSize)
-	}
 
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(payload)))

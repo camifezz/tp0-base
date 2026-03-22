@@ -84,8 +84,11 @@ func (c *Client) StartClientLoop() {
 
 	scanner := bufio.NewScanner(file)
 	batch := make([]Bet, 0, c.config.MaxBatchSize)
+	currentPayloadSize := 0
 
-	// Procesa el archivo línea a línea, acumulando apuestas en batches
+	// Procesa el archivo línea a línea, acumulando apuestas en batches.
+	// Manda el batch cuando se alcanza maxAmount apuestas o cuando agregar
+	// la siguiente apuesta superaría el límite de 8KB.
 	for !c.shuttingDown {
 		hasMore := scanner.Scan()
 		if hasMore {
@@ -99,25 +102,41 @@ func (c *Client) StartClientLoop() {
 					c.config.ID, line)
 				continue
 			}
-			batch = append(batch, Bet{
+			bet := Bet{
 				Agency:    c.config.ID,
 				FirstName: parts[0],
 				LastName:  parts[1],
 				Document:  parts[2],
 				Birthdate: parts[3],
 				Number:    parts[4],
-			})
-		}
-
-		// Envía el batch cuando está lleno o cuando se terminó el archivo
-		if len(batch) == c.config.MaxBatchSize || (!hasMore && len(batch) > 0) {
-			if err := c.sendBatchAndReceive(batch); err != nil {
-				return
 			}
-			batch = batch[:0]
+
+			betSize := SerializedBetSize(bet)
+			if len(batch) > 0 {
+				betSize++
+			}
+
+			// Manda el batch si agregar la apuesta supera 8KB o se alcanzó maxAmount
+			if len(batch) > 0 && (currentPayloadSize+betSize > MaxPayloadSize || len(batch) == c.config.MaxBatchSize) {
+				if err := c.sendBatchAndReceive(batch); err != nil {
+					return
+				}
+				batch = batch[:0]
+				currentPayloadSize = 0
+				betSize = SerializedBetSize(bet)
+			}
+
+			batch = append(batch, bet)
+			currentPayloadSize += betSize
 		}
 
+		// Manda el batch restante al terminar el archivo
 		if !hasMore {
+			if len(batch) > 0 {
+				if err := c.sendBatchAndReceive(batch); err != nil {
+					return
+				}
+			}
 			break
 		}
 	}
@@ -128,7 +147,7 @@ func (c *Client) StartClientLoop() {
 	}
 }
 
-// sendBatchAndReceive envía un batch al servidor y espera su confirmación.
+// sendBatchAndReceive manda un batch al servidor y espera su confirmación.
 func (c *Client) sendBatchAndReceive(batch []Bet) error {
 	if err := SendBatch(c.conn, batch); err != nil {
 		log.Errorf("action: send_batch | result: fail | client_id: %v | error: %v",

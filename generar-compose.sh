@@ -40,7 +40,7 @@ if [ "$client_count" -gt 0 ]; then
       - CLI_ID=${i}
     volumes:
       - ./client/config.yaml:/config.yaml:ro
-      - ./.data/dataset/agency-${i}.csv:/agency-${i}.csv:ro
+      - ./.data/agency-${i}.csv:/agency-${i}.csv:ro
     networks:
       - testing_net
     depends_on:

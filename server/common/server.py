@@ -136,7 +136,7 @@ class Server:
         winners = [
             bet.document
             for bet in load_bets()
-            if bet.agency == agency_id and has_won(bet)
+            if str(bet.agency) == agency_id and has_won(bet)
         ]
         send_response(client_sock, ','.join(winners))
 

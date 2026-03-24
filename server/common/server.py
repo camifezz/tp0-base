@@ -7,14 +7,12 @@ from .protocol import (
 )
 from .utils import store_bets, load_bets, has_won
 
-TOTAL_AGENCIES = 5
-
-
 class Server:
-    def __init__(self, port, listen_backlog):
+    def __init__(self, port, listen_backlog, total_agencies):
         self._shutting_down = False
         self._fins_received = 0
         self._lottery_done = False
+        self._total_agencies = total_agencies
 
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
@@ -96,7 +94,7 @@ class Server:
             msg_type, body = receive_message(client_sock)
             if msg_type == MSG_TYPE_FIN:
                 self._fins_received += 1
-                if self._fins_received == TOTAL_AGENCIES:
+                if self._fins_received == self._total_agencies:
                     self.__run_lottery()
                 break
             elif msg_type == MSG_TYPE_BATCH:

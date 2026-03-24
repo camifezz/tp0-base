@@ -13,7 +13,7 @@ if ! [[ "$client_count" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-cat > "$output_file" <<'COMPOSE'
+cat > "$output_file" <<COMPOSE
 name: tp0
 services:
   server:
@@ -22,6 +22,7 @@ services:
     entrypoint: python3 /main.py
     environment:
       - PYTHONUNBUFFERED=1
+      - SERVER_TOTAL_AGENCIES=${client_count}
     networks:
       - testing_net
     volumes:

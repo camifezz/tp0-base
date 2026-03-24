@@ -3,6 +3,11 @@ from .utils import Bet
 
 HEADER_SIZE = 4
 
+# Tipos de mensaje del protocolo
+MSG_TYPE_BATCH = b'B'
+MSG_TYPE_FIN = b'F'
+MSG_TYPE_WINNER_QUERY = b'W'
+
 
 def _recv_exactly(sock, n):
     """Lee exactamente n bytes del socket, iterando para evitar short reads."""
@@ -25,19 +30,29 @@ def _send_all(sock, data):
         total += sent
 
 
-def receive_batch(sock):
+def receive_message(sock):
     """
-    Recibe un batch de apuestas del cliente.
-    Protocolo: [4 bytes big-endian con longitud][apuesta1\\napuesta2\\n...]
-    Cada apuesta tiene el formato: agencia|nombre|apellido|documento|nacimiento|numero
-    Retorna una lista de Bet. Lanza ConnectionError si el cliente cerró la conexión.
+    Recibe un mensaje del cliente.
+    Formato: [1 byte tipo][4 bytes longitud big-endian][body]
+    Retorna (tipo, body) donde tipo es bytes de 1 caracter y body es bytes.
     """
+    msg_type = _recv_exactly(sock, 1)
     header = _recv_exactly(sock, HEADER_SIZE)
     length = struct.unpack('!I', header)[0]
-    body = _recv_exactly(sock, length).decode('utf-8')
+    if length == 0:
+        return msg_type, b''
+    body = _recv_exactly(sock, length)
+    return msg_type, body
 
+
+def parse_batch(body):
+    """
+    Parsea el body de un mensaje de tipo BET_BATCH.
+    Cada línea tiene el formato: agencia|nombre|apellido|documento|nacimiento|numero
+    Retorna una lista de Bet.
+    """
     bets = []
-    for line in body.split('\n'):
+    for line in body.decode('utf-8').split('\n'):
         line = line.strip()
         if not line:
             continue
@@ -47,11 +62,12 @@ def receive_batch(sock):
     return bets
 
 
-def send_response(sock, ok):
+def send_response(sock, msg):
     """
     Envía una respuesta al cliente.
-    Protocolo: [4 bytes big-endian con longitud]["OK" o "ERR"]
+    Formato: [4 bytes longitud big-endian][body]
     """
-    msg = b'OK' if ok else b'ERR'
+    if isinstance(msg, str):
+        msg = msg.encode('utf-8')
     header = struct.pack('!I', len(msg))
     _send_all(sock, header + msg)

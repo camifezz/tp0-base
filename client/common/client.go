@@ -66,19 +66,77 @@ func (c *Client) Shutdown() {
 	c.closeConnection()
 }
 
-// StartClientLoop abre una única conexión, lee el archivo CSV de apuestas en
-// batches y los envía al servidor. Por cada batch espera la confirmación del servidor.
+// StartClientLoop gestiona el flujo completo del cliente:
+// 1. Envía todos los batches de apuestas al servidor.
+// 2. Notifica al servidor que terminó (FIN) y consulta los ganadores.
+// 3. Si el sorteo aún no ocurrió (NOT_READY), reintenta la consulta en una nueva conexión.
 func (c *Client) StartClientLoop() {
 	if err := c.createClientSocket(); err != nil {
 		return
 	}
-	defer c.closeConnection()
 
+	// Fase 1: envío de apuestas
+	if err := c.sendAllBets(); err != nil {
+		c.closeConnection()
+		return
+	}
+
+	// Notifica fin de apuestas y consulta ganadores en la misma conexión
+	if err := SendFin(c.conn, c.config.ID); err != nil {
+		log.Errorf("action: send_fin | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		c.closeConnection()
+		return
+	}
+	if err := SendWinnerQuery(c.conn, c.config.ID); err != nil {
+		log.Errorf("action: send_winner_query | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		c.closeConnection()
+		return
+	}
+	response, err := ReceiveResponse(c.conn)
+	c.closeConnection()
+	if err != nil {
+		log.Errorf("action: receive_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	// Fase 2: si el sorteo aún no ocurrió, reintenta la consulta en nuevas conexiones
+	for response == "NOT_READY" && !c.shuttingDown {
+		if err := c.createClientSocket(); err != nil {
+			return
+		}
+		if err := SendWinnerQuery(c.conn, c.config.ID); err != nil {
+			log.Errorf("action: send_winner_query | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			c.closeConnection()
+			return
+		}
+		response, err = ReceiveResponse(c.conn)
+		c.closeConnection()
+		if err != nil {
+			log.Errorf("action: receive_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			return
+		}
+	}
+
+	if c.shuttingDown {
+		return
+	}
+
+	// Cuenta los DNIs ganadores recibidos (separados por coma)
+	count := 0
+	if response != "" {
+		count = len(strings.Split(response, ","))
+	}
+	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", count)
+}
+
+// sendAllBets lee el CSV de apuestas y las envía al servidor en batches.
+// Retorna error si falla el envío o la recepción de respuesta.
+func (c *Client) sendAllBets() error {
 	file, err := os.Open(c.config.DataFilePath)
 	if err != nil {
 		log.Errorf("action: open_file | result: fail | client_id: %v | error: %v",
 			c.config.ID, err)
-		return
+		return err
 	}
 	defer file.Close()
 
@@ -113,13 +171,13 @@ func (c *Client) StartClientLoop() {
 
 			betSize := SerializedBetSize(bet)
 			if len(batch) > 0 {
-				betSize++
+				betSize++ // separador '\n'
 			}
 
 			// Manda el batch si agregar la apuesta supera 8KB o se alcanzó maxAmount
 			if len(batch) > 0 && (currentPayloadSize+betSize > MaxPayloadSize || len(batch) == c.config.MaxBatchSize) {
 				if err := c.sendBatchAndReceive(batch); err != nil {
-					return
+					return err
 				}
 				batch = batch[:0]
 				currentPayloadSize = 0
@@ -134,7 +192,7 @@ func (c *Client) StartClientLoop() {
 		if !hasMore {
 			if len(batch) > 0 {
 				if err := c.sendBatchAndReceive(batch); err != nil {
-					return
+					return err
 				}
 			}
 			break
@@ -144,7 +202,9 @@ func (c *Client) StartClientLoop() {
 	if err := scanner.Err(); err != nil {
 		log.Errorf("action: read_file | result: fail | client_id: %v | error: %v",
 			c.config.ID, err)
+		return err
 	}
+	return nil
 }
 
 // sendBatchAndReceive manda un batch al servidor y espera su confirmación.

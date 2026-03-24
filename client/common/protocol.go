@@ -11,6 +11,13 @@ import (
 // MaxPayloadSize es el límite en bytes del payload de un batch (8 KiB).
 const MaxPayloadSize = 8192
 
+// Tipos de mensaje del protocolo.
+const (
+	MsgTypeBatch       = byte('B')
+	MsgTypeFin         = byte('F')
+	MsgTypeWinnerQuery = byte('W')
+)
+
 // Bet representa una apuesta de quiniela a enviar al servidor.
 type Bet struct {
 	Agency    string
@@ -32,9 +39,23 @@ func SerializedBetSize(bet Bet) int {
 		len(bet.Number)
 }
 
+// sendMessage serializa y envía un mensaje con tipo.
+// Formato: [1 byte tipo][4 bytes longitud big-endian][payload]
+func sendMessage(conn net.Conn, msgType byte, payload []byte) error {
+	header := make([]byte, 5)
+	header[0] = msgType
+	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
+	if err := sendAll(conn, header); err != nil {
+		return err
+	}
+	if len(payload) > 0 {
+		return sendAll(conn, payload)
+	}
+	return nil
+}
+
 // SendBatch serializa un batch de apuestas y lo envía por la conexión.
-// Cada apuesta se separa con '\n' en el body. El protocolo usa un prefijo
-// de 4 bytes big-endian con la longitud total para evitar short writes.
+// Cada apuesta se separa con '\n' en el body.
 func SendBatch(conn net.Conn, bets []Bet) error {
 	lines := make([]string, len(bets))
 	for i, bet := range bets {
@@ -47,26 +68,30 @@ func SendBatch(conn net.Conn, bets []Bet) error {
 			bet.Number,
 		)
 	}
-
 	payload := []byte(strings.Join(lines, "\n"))
-
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(payload)))
-
-	if err := sendAll(conn, header); err != nil {
-		return err
-	}
-	return sendAll(conn, payload)
+	return sendMessage(conn, MsgTypeBatch, payload)
 }
 
-// ReceiveResponse lee una respuesta con prefijo de longitud enviada por el servidor.
+// SendFin notifica al servidor que la agencia terminó de enviar todas sus apuestas.
+func SendFin(conn net.Conn, agencyID string) error {
+	return sendMessage(conn, MsgTypeFin, []byte(agencyID))
+}
+
+// SendWinnerQuery consulta al servidor la lista de ganadores de la agencia.
+func SendWinnerQuery(conn net.Conn, agencyID string) error {
+	return sendMessage(conn, MsgTypeWinnerQuery, []byte(agencyID))
+}
+
+// ReceiveResponse lee una respuesta del servidor con prefijo de longitud.
 func ReceiveResponse(conn net.Conn) (string, error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(conn, header); err != nil {
 		return "", err
 	}
 	length := binary.BigEndian.Uint32(header)
-
+	if length == 0 {
+		return "", nil
+	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(conn, body); err != nil {
 		return "", err

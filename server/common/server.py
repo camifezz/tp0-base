@@ -7,6 +7,7 @@ class Server:
     def __init__(self, port, listen_backlog):
         # Atributo para saber si se tiene que cerrar o no la conexion
         self._shutting_down = False
+        self._current_client_sock = None
 
         # Initialize server socket
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -20,8 +21,9 @@ class Server:
         Handler de SIGTERM.
 
         Marca el servidor en estado de apagado y cierra el socket listener
-        para detener la aceptación de nuevas conexiones y permitir que el
-        loop principal finalice de manera ordenada.
+        y el socket del cliente activo (si lo hay) para desbloquear cualquier
+        recv() pendiente y permitir que el loop principal finalice de manera
+        ordenada con todos los FDs cerrados.
         """
         logging.info('action: shutdown_signal_received | result: success | signal: SIGTERM')
         self._shutting_down = True
@@ -31,6 +33,13 @@ class Server:
             logging.info('action: close_server_socket | result: success')
         except OSError as e:
             logging.error(f'action: close_server_socket | result: fail | error: {e}')
+
+        if self._current_client_sock is not None:
+            try:
+                self._current_client_sock.close()
+                logging.info('action: close_client_socket_on_shutdown | result: success')
+            except OSError as e:
+                logging.error(f'action: close_client_socket_on_shutdown | result: fail | error: {e}')
 
     def run(self):
         """
@@ -58,6 +67,7 @@ class Server:
         If a problem arises in the communication with the client, the
         client socket will also be closed.
         """
+        self._current_client_sock = client_sock
         try:
             msg = client_sock.recv(1024).rstrip().decode('utf-8')
             addr = client_sock.getpeername()
@@ -66,6 +76,7 @@ class Server:
         except OSError as e:
             logging.error(f'action: receive_message | result: fail | error: {e}')
         finally:
+            self._current_client_sock = None
             try:
                 client_sock.close()
                 logging.info('action: close_client_socket | result: success')

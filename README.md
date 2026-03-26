@@ -430,6 +430,68 @@ En este ejercicio es importante considerar los mecanismos de sincronización a u
 
 Modificar el servidor para que permita aceptar conexiones y procesar mensajes en paralelo. En caso de que el alumno implemente el servidor en Python utilizando _multithreading_,  deberán tenerse en cuenta las [limitaciones propias del lenguaje](https://wiki.python.org/moin/GlobalInterpreterLock).
 
+### Solución propuesta Ejercicio N°8:
+
+#### Arquitectura multithreaded
+
+El servidor ahora lanza un thread por cada cliente que se conecta. El loop principal solo acepta conexiones y delega el procesamiento a los threads. Al recibir SIGTERM, espera que todos los threads terminen con `join()` antes de finalizar.
+
+#### Mecanismos de sincronización
+
+La función `store_bets()` no es thread-safe: eso significa que dos threads pueden escribir el archivo `bets.csv`. Para evitar esto, cada thread adquiere el lock antes de llamar a `store_bets()` y lo libera al terminar.
+
+```
+Thread 1: acquire(lock) → store_bets() → release(lock)
+Thread 2: acquire(lock) → store_bets() → release(lock)  ← espera hasta que Thread 1 libere
+```
+
+**Implementación de una Barrera — sincronización del sorteo**
+
+La barrera se inicializa con `N = total_agencies`. Cada thread, al recibir el mensaje `FIN` de su agencia, llama a `barrier.wait()` y bloquea. Cuando el último thread llega a la barrera, se ejecuta automáticamente `__run_lottery()` (via el parámetro `action`) y libera a todos los threads simultáneamente. A partir de ese momento cada thread responde a su cliente con los ganadores correspondientes.
+
+```
+Thread 1 (agency 1): recibe FIN → barrier.wait() → bloquea
+Thread 2 (agency 2): recibe FIN → barrier.wait() → bloquea
+Thread 3 (agency 3): recibe FIN → barrier.wait() → ejecuta sorteo → todos liberados → responden
+```
+
+#### Cambio respecto al ejercicio 7
+
+En el ej7 el cliente hacía polling reconectándose hasta recibir los ganadores (`NOT_READY`). En el ej8 el cliente mantiene **una única conexión** durante todo el flujo: envía batches → FIN → WINNER_QUERY y queda bloqueado esperando. El servidor lo desbloquea cuando la barrera se libera. Esto elimina el overhead de reconexiones y el mensaje `NOT_READY` del protocolo.
+
+
+#### Cómo ejecutar
+
+1. Descomprimir los datasets en `.data/` (si no están descomprimidos):
+```bash
+cd .data && unzip datasets.zip
+```
+
+2. Generar el compose con N clientes (ej. 5):
+```bash
+./generar-compose.sh docker-compose-dev.yaml 5
+```
+
+3. Construir las imágenes:
+```bash
+make docker-image
+```
+
+4. Levantar el entorno:
+```bash
+make docker-compose-up
+```
+
+5. Ver los logs:
+```bash
+make docker-compose-logs
+```
+
+6. Detener el entorno:
+```bash
+make docker-compose-down
+```
+
 ## Condiciones de Entrega
 Se espera que los alumnos realicen un _fork_ del presente repositorio para el desarrollo de los ejercicios y que aprovechen el esqueleto provisto tanto (o tan poco) como consideren necesario.
 

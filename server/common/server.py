@@ -1,18 +1,25 @@
 import socket
 import logging
 import signal
+import threading
 from .protocol import (
     receive_message, parse_batch, send_response,
     MSG_TYPE_BATCH, MSG_TYPE_FIN, MSG_TYPE_WINNER_QUERY
 )
 from .utils import store_bets, load_bets, has_won
 
+
 class Server:
     def __init__(self, port, listen_backlog, total_agencies):
         self._shutting_down = False
-        self._fins_received = 0
-        self._lottery_done = False
-        self._total_agencies = total_agencies
+
+        # Lock para proteger store_bets (no es thread-safe)
+        self._store_lock = threading.Lock()
+
+        # Barrera que bloquea cada thread hasta que todas las agencias
+        # finalizaron el envío de apuestas. Al llegar la última, ejecuta
+        # el sorteo automáticamente como acción de la barrera.
+        self._barrier = threading.Barrier(total_agencies, action=self.__run_lottery)
 
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
@@ -39,38 +46,45 @@ class Server:
 
     def run(self):
         """
-        Server loop
-
-        Accepts new connections and communicates with clients until a
-        SIGTERM is received. On shutdown, the listener socket is closed
-        gracefully.
+        Acepta conexiones y lanza un thread por cliente hasta recibir SIGTERM.
         """
+        threads = []
         while not self._shutting_down:
             try:
                 client_sock = self.__accept_new_connection()
-                self.__handle_client_connection(client_sock)
+                t = threading.Thread(target=self.__handle_client_connection, args=(client_sock,))
+                t.start()
+                threads.append(t)
             except OSError as e:
                 if self._shutting_down:
                     break
                 logging.error(f'action: accept_connections | result: fail | error: {e}')
 
+        for t in threads:
+            t.join()
+
         logging.info('action: graceful_shutdown | result: success')
 
     def __handle_client_connection(self, client_sock):
         """
-        Atiende a un cliente. Distingue dos tipos de conexión según el primer mensaje:
-        - BET_BATCH: fase de apuestas seguida de FIN y consulta de ganadores.
-        - WINNER_QUERY: reconexión para consultar ganadores (cuando se recibió NOT_READY).
+        Atiende a un cliente en su propio thread:
+        recibe todos sus batches, espera en la barrera junto a las demás
+        agencias y luego responde con los ganadores correspondientes.
         """
         try:
             msg_type, body = receive_message(client_sock)
+            if msg_type != MSG_TYPE_BATCH:
+                return
 
-            if msg_type == MSG_TYPE_BATCH:
-                self.__handle_betting_phase(client_sock, body)
-                self.__handle_winner_query(client_sock)
-            elif msg_type == MSG_TYPE_WINNER_QUERY:
-                agency_id = body.decode('utf-8')
-                self.__respond_winner_query(client_sock, agency_id)
+            agency_id = self.__handle_betting_phase(client_sock, body)
+
+            # Bloquea hasta que todas las agencias terminaron.
+            # La última en llegar ejecuta __run_lottery automáticamente.
+            self._barrier.wait()
+
+            self.__handle_winner_query(client_sock, agency_id)
+        except threading.BrokenBarrierError:
+            logging.error('action: barrier | result: fail | error: barrera rota')
         except (OSError, ConnectionError, ValueError) as e:
             logging.error(f'action: handle_client | result: fail | error: {e}')
         finally:
@@ -82,29 +96,29 @@ class Server:
 
     def __handle_betting_phase(self, client_sock, first_body):
         """
-        Recibe batches de apuestas y los almacena. Cuando llega el mensaje FIN,
-        incrementa el contador de agencias finalizadas y corre el sorteo si son todas.
+        Recibe y almacena todos los batches de apuestas hasta recibir el FIN.
+        Retorna el agency_id de la agencia conectada.
         """
-        # Procesa el primer batch ya leído
         bets = parse_batch(first_body)
+        agency_id = bets[0].agency if bets else None
         self.__store_and_respond(client_sock, bets)
 
-        # Sigue recibiendo hasta el FIN
         while True:
             msg_type, body = receive_message(client_sock)
             if msg_type == MSG_TYPE_FIN:
-                self._fins_received += 1
-                if self._fins_received == self._total_agencies:
-                    self.__run_lottery()
+                agency_id = body.decode('utf-8')
                 break
             elif msg_type == MSG_TYPE_BATCH:
                 bets = parse_batch(body)
                 self.__store_and_respond(client_sock, bets)
 
+        return agency_id
+
     def __store_and_respond(self, client_sock, bets):
-        """Almacena un batch de apuestas y responde OK o ERR al cliente."""
+        """Almacena un batch de apuestas con lock y responde OK o ERR al cliente."""
         try:
-            store_bets(bets)
+            with self._store_lock:
+                store_bets(bets)
             logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
             send_response(client_sock, 'OK')
         except Exception as e:
@@ -112,40 +126,27 @@ class Server:
             send_response(client_sock, 'ERR')
 
     def __run_lottery(self):
-        """Ejecuta el sorteo una vez que todas las agencias finalizaron el envío."""
+        """
+        Ejecuta el sorteo. Es llamado automáticamente por la barrera
+        cuando todas las agencias finalizaron el envío de apuestas.
+        """
         logging.info('action: sorteo | result: success')
-        self._lottery_done = True
 
-    def __handle_winner_query(self, client_sock):
-        """Recibe la consulta de ganadores y responde según el estado del sorteo."""
+    def __handle_winner_query(self, client_sock, agency_id):
+        """Recibe la consulta de ganadores y responde con los DNIs de la agencia."""
         msg_type, body = receive_message(client_sock)
         if msg_type == MSG_TYPE_WINNER_QUERY:
             agency_id = body.decode('utf-8')
-            self.__respond_winner_query(client_sock, agency_id)
-
-    def __respond_winner_query(self, client_sock, agency_id):
-        """
-        Responde a una consulta de ganadores.
-        Si el sorteo no ocurrió aún, responde NOT_READY.
-        Si ya ocurrió, responde con los DNIs ganadores de la agencia separados por coma.
-        """
-        if not self._lottery_done:
-            send_response(client_sock, 'NOT_READY')
-            return
-
-        winners = [
-            bet.document
-            for bet in load_bets()
-            if str(bet.agency) == agency_id and has_won(bet)
-        ]
-        send_response(client_sock, ','.join(winners))
+            winners = [
+                bet.document
+                for bet in load_bets()
+                if str(bet.agency) == agency_id and has_won(bet)
+            ]
+            send_response(client_sock, ','.join(winners))
 
     def __accept_new_connection(self):
         """
-        Accept new connections.
-
-        Function blocks until a connection to a client is made.
-        Then connection created is printed and returned.
+        Acepta una nueva conexión entrante y retorna el socket del cliente.
         """
         logging.info('action: accept_connections | result: in_progress')
         c, addr = self._server_socket.accept()

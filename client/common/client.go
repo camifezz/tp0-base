@@ -66,62 +66,39 @@ func (c *Client) Shutdown() {
 	c.closeConnection()
 }
 
-// StartClientLoop gestiona el flujo completo del cliente:
+// StartClientLoop gestiona el flujo completo del cliente en una única conexión:
 // 1. Envía todos los batches de apuestas al servidor.
-// 2. Notifica al servidor que terminó (FIN) y consulta los ganadores.
-// 3. Si el sorteo aún no ocurrió (NOT_READY), reintenta la consulta en una nueva conexión.
+// 2. Notifica al servidor que terminó con un mensaje de (FIN).
+// 3. Envía la consulta de ganadores y se bloquea hasta recibir la respuesta.
+//    El servidor mantiene la conexión abierta hasta que el sorteo esté listo.
 func (c *Client) StartClientLoop() {
 	if err := c.createClientSocket(); err != nil {
 		return
 	}
+	defer c.closeConnection()
 
-	// Fase 1: envío de apuestas
 	if err := c.sendAllBets(); err != nil {
-		c.closeConnection()
 		return
 	}
 
-	// Notifica fin de apuestas y consulta ganadores en la misma conexión
 	if err := SendFin(c.conn, c.config.ID); err != nil {
 		log.Errorf("action: send_fin | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		c.closeConnection()
 		return
 	}
+
 	if err := SendWinnerQuery(c.conn, c.config.ID); err != nil {
 		log.Errorf("action: send_winner_query | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		c.closeConnection()
 		return
 	}
+
+	// El servidor bloquea hasta que todas las agencias terminaron (barrera).
+	// El cliente espera la respuesta sin reconectar.
 	response, err := ReceiveResponse(c.conn)
-	c.closeConnection()
 	if err != nil {
 		log.Errorf("action: receive_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
 	}
 
-	// Fase 2: si el sorteo aún no ocurrió, reintenta la consulta en nuevas conexiones
-	for response == "NOT_READY" && !c.shuttingDown {
-		if err := c.createClientSocket(); err != nil {
-			return
-		}
-		if err := SendWinnerQuery(c.conn, c.config.ID); err != nil {
-			log.Errorf("action: send_winner_query | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			c.closeConnection()
-			return
-		}
-		response, err = ReceiveResponse(c.conn)
-		c.closeConnection()
-		if err != nil {
-			log.Errorf("action: receive_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return
-		}
-	}
-
-	if c.shuttingDown {
-		return
-	}
-
-	// Cuenta los DNIs ganadores recibidos (separados por coma)
 	count := 0
 	if response != "" {
 		count = len(strings.Split(response, ","))

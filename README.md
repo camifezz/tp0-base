@@ -340,6 +340,89 @@ Las funciones `load_bets(...)` y `has_won(...)` son provistas por la cátedra y 
 
 No es correcto realizar un broadcast de todos los ganadores hacia todas las agencias, se espera que se informen los DNIs ganadores que correspondan a cada una de ellas.
 
+### Solución propuesta Ejercicio N°7:
+
+#### Flujo general
+
+El ejercicio se divide en dos fases por cliente:
+
+1. **Fase de apuestas**: igual al ejercicio 6, el cliente envía todos los batches y recibe `OK`/`ERR` dependiendo de como haya recibido el mensaje el server. Al terminar, envia un mensaje de tipo `FIN` al server indicando que esa agencia finalizó el envío de los batches.
+2. **Fase de consulta**: el cliente envía un mensaje `WINNER_QUERY` con su agency ID y espera la respuesta. Si el sorteo aún no ocurrió, el servidor responde `NOT_READY` y el cliente reintenta en una nueva conexión (polling). Cuando el sorteo ya terminó, el servidor responde con los DNIs ganadores de esa agencia separados por coma.
+
+#### Protocolo de comunicación
+
+Se extendió el protocolo agregando un byte de tipo de mensaje al header:
+
+```
+[1 byte: tipo de mensaje][4 bytes: tamaño del body][body]
+```
+
+Tipos de mensaje cliente → servidor:
+| Tipo | Byte | Body |
+|---|---|---|
+| Batch de apuestas | `B` | apuestas serializadas separadas por `\n` |
+| Fin de envío | `F` | agency ID |
+| Consulta de ganadores | `W` | agency ID |
+
+Respuestas servidor → cliente (sin byte de tipo):
+| Respuesta | Significado |
+|---|---|
+| `OK` | Batch recibido correctamente |
+| `ERR` | Error al recibir el batch |
+| `NOT_READY` | El sorteo todavía no ocurrió |
+| `dni1,dni2,...` | DNIs ganadores de la agencia (puede ser vacío `""`) |
+
+#### Sincronización del sorteo
+
+El servidor lleva un contador de FINs recibidos. Cuando el contador iguala el total de agencias configurado (`SERVER_TOTAL_AGENCIES`), ejecuta el sorteo usando `load_bets()` y `has_won()` y marca `_lottery_done = True`. A partir de ese momento responde a las consultas de ganadores por parte de los clientes con los DNIs correspondientes a cada agencia.
+
+La cantidad de agencias esperadas se configura por la variable de entorno `SERVER_TOTAL_AGENCIES`, inyectada por `generar-compose.sh` con el valor igual a la cantidad de clientes generados.
+
+#### Polling del cliente
+
+Como el servidor es monothreaded y puede atender un cliente a la vez, las agencias terminan de enviar sus apuestas en momentos distintos. Las que terminan antes de que lleguen todos los FINs reciben `NOT_READY` y reintentan la consulta abriendo una nueva conexión, hasta que el sorteo esté disponible.
+
+#### Separación de responsabilidades
+
+| Módulo | Responsabilidad |
+|---|---|
+| `client/common/protocol.go` | `SendBatch`, `SendFin`, `SendWinnerQuery`, `ReceiveResponse` |
+| `client/common/client.go` | Fase de apuestas + envío de FIN + polling de ganadores |
+| `server/common/protocol.py` | `receive_message`, `parse_batch`, `send_response` |
+| `server/common/server.py` | Contador de FINs, ejecución del sorteo, respuesta por agencia |
+
+#### Cómo ejecutar
+
+1. Descomprimir los datasets en `.data/` (si no están descomprimidos):
+```bash
+cd .data && unzip datasets.zip
+```
+
+2. Generar el compose con N clientes (ej. 5):
+```bash
+./generar-compose.sh docker-compose-dev.yaml 5
+```
+
+3. Construir las imagenes:
+```bash
+make docker-image
+```
+
+4. Levantar el container:
+```bash
+make docker-compose-up
+```
+
+5. Ver los logs:
+```bash
+make docker-compose-logs
+```
+
+6. Detener el container:
+```bash
+make docker-compose-down
+```
+
 ## Parte 3: Repaso de Concurrencia
 En este ejercicio es importante considerar los mecanismos de sincronización a utilizar para el correcto funcionamiento de la persistencia.
 
